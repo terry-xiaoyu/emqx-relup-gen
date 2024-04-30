@@ -41,6 +41,13 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    try safe_do(State)
+    catch
+        throw:Reason ->
+            {error, {?MODULE, Reason}}
+    end.
+
+safe_do(State) ->
     {RawArgs, _} = rebar_state:command_parsed_args(State),
     RelupDir = getopt_relup_dir(RawArgs),
     TargetVsn = get_current_rel_vsn(State),
@@ -100,8 +107,13 @@ load_partial_relup_files(RelupDir) ->
     end.
 
 save_relup_file(Relup, TargetVsn, State) ->
-    RelupFile = filename:join([get_rel_dir(State), TargetVsn, io_lib:format("~s.relup", [TargetVsn])]),
-    file:write_file(RelupFile, io_lib:format("~p.", [Relup])).
+    Filename = io_lib:format("~s.relup", [TargetVsn]),
+    RelupFile = filename:join([get_rel_dir(State), "releases", TargetVsn, Filename]),
+    case file:write_file(RelupFile, io_lib:format("~p.", [Relup])) of
+        ok -> ok;
+        {error, Reason} ->
+            throw({save_relup_file_error, #{error => Reason, file => RelupFile}})
+    end.
 
 %% Assume that we have a UpgradePath = 5 <- 3 <- 2 <- 1, then we need to have
 %%  following relup files: (2 <- 1).relup, (3 <- 2).relup, (5 <- 3).relup, then we
