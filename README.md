@@ -15,4 +15,4 @@ Add the plugin to the rebar config of emqx project:
 
 Then just call your plugin directly in emqx project:
 
-    $ ./rebar3 emqx relup_gen --relup-dir=./relup 5.6.1+patch.A
+    $ ./rebar3 emqx relup_gen --relup-dir=./relup

@@ -9,9 +9,7 @@
         "The directory that contains upgrade path file and the *.relup files."
         " The upgrade path file defaults to 'upgrade_path.list'."},
     {path_file_name, $u, "path-file-name", {string, "upgrade_path.list"},
-        "The filename that describes the upgrade path."},
-    {target_vsn, undefined, undefined, string,
-        "The target version to be upgraded to"}
+        "The filename that describes the upgrade path."}
 ]).
 -define(INCLUDE_DIRS, ["bin", "lib", "plugins", "releases"]).
 -define(TAR_FILE(VSN), VSN ++ ".tar.gz").
@@ -31,7 +29,7 @@ init(State) ->
             {module, ?MODULE},
             {bare, true},
             {deps, ?DEPS},
-            {example, "./rebar3 emqx relup_gen --relup-dir=./relup 5.6.1+patch.A"},
+            {example, "./rebar3 emqx relup_gen --relup-dir=./relup"},
             {profiles, ['emqx-enterprise']},
             {opts, ?CLI_OPTS},
             {short_desc, "A rebar plugin that helps to generate relup tarball for emqx."},
@@ -45,9 +43,9 @@ init(State) ->
 do(State) ->
     {RawArgs, _} = rebar_state:command_parsed_args(State),
     RelupDir = getopt_relup_dir(RawArgs),
-    TargetVsn = getopt_target_vsn(RawArgs),
+    TargetVsn = get_current_rel_vsn(State),
     PathFile = getopt_upgrade_path_file(RelupDir, RawArgs),
-    rebar_log:log(info, "gen relup tarball for: ~p", [TargetVsn]),
+    rebar_log:log(info, "generating relup tarball for: ~p", [TargetVsn]),
     rebar_log:log(debug, "using relup dir: ~p", [RelupDir]),
     rebar_log:log(debug, "using upgrade path_file: ~p", [PathFile]),
     #{target_vsn := TargetVsn, upgrade_path := UpgradePath}
@@ -62,11 +60,13 @@ get_upgrade_path(PathFile, TargetVsn) ->
     case file:script(PathFile) of
         {ok, PathDescList} ->
             PathDescList1 = lists:map(fun parse_path_desc/1, PathDescList),
-            case lists:search(fun(#{target_vsn := Vsn}) ->
-                        Vsn =:= TargetVsn
-                    end, PathDescList1) of
-                false -> throw({target_vsn_not_found_in_path_file, #{file => PathFile}});
-                {value, PathDesc} -> PathDesc
+            Search = fun(#{target_vsn := Vsn}) -> Vsn =:= TargetVsn end,
+            case lists:search(Search, PathDescList1) of
+                false ->
+                    Reason = #{target_vsn => TargetVsn, file => PathFile},
+                    throw({target_vsn_not_found_in_path_file, Reason});
+                {value, PathDesc} ->
+                    PathDesc
             end;
         {error, Reason} ->
             throw({get_upgrade_path_error, #{error => Reason, file => PathFile}})
@@ -100,10 +100,7 @@ load_partial_relup_files(RelupDir) ->
     end.
 
 save_relup_file(Relup, TargetVsn, State) ->
-    RelxOpts = rebar_state:get(State, relx, []),
-    rebar_log:log(warn, "--------RelxOpts: ~p", [RelxOpts]),
-    {_Name, RelxVsn} = proplists:get_value(default_release, RelxOpts),
-    RelupFile = filename:join([get_rel_dir(State), RelxVsn, io_lib:format("~s.relup", [TargetVsn])]),
+    RelupFile = filename:join([get_rel_dir(State), TargetVsn, io_lib:format("~s.relup", [TargetVsn])]),
     file:write_file(RelupFile, io_lib:format("~p.", [Relup])).
 
 %% Assume that we have a UpgradePath = 5 <- 3 <- 2 <- 1, then we need to have
@@ -163,10 +160,13 @@ make_relup_tarball(TargetVsn, State) ->
 get_rel_dir(State) ->
     filename:join([rebar_dir:base_dir(State), "rel", "emqx"]).
 
-getopt_target_vsn(RawArgs) ->
-    case proplists:get_value(target_vsn, RawArgs) of
-        undefined -> throw({missing_cmd_args, target_vsn});
-        TargetVsn -> TargetVsn
+get_current_rel_vsn(State) ->
+    RelxOpts = rebar_state:get(State, relx, []),
+    case lists:keyfind(release, 1, rebar_state:get(State, relx, [])) of
+        false ->
+            throw({relx_opts_not_found, #{relx_opts => RelxOpts}});
+        {release, {_Name, RelxVsn}, _} ->
+            RelxVsn
     end.
 
 getopt_relup_dir(RawArgs) ->
