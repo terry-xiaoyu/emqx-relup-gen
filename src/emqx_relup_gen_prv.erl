@@ -51,6 +51,7 @@ safe_do(State) ->
     {RawArgs, _} = rebar_state:command_parsed_args(State),
     RelupDir = getopt_relup_dir(RawArgs),
     TargetVsn = get_current_rel_vsn(State),
+    TarFile = ?TAR_FILE(TargetVsn),
     PathFile = getopt_upgrade_path_file(RelupDir, RawArgs),
     rebar_log:log(info, "generating relup tarball for: ~p", [TargetVsn]),
     rebar_log:log(debug, "using relup dir: ~p", [RelupDir]),
@@ -60,7 +61,8 @@ safe_do(State) ->
     Relups = load_partial_relup_files(RelupDir),
     CompleteRelup = gen_compelte_relup(Relups, TargetVsn, UpgradePath),
     ok = save_relup_file(CompleteRelup, TargetVsn, State),
-    ok = make_relup_tarball(TargetVsn, State),
+    ok = make_relup_tarball(TarFile, State),
+    rebar_log:log(info, "relup tarball generated: ~p", [TarFile]),
     {ok, State}.
 
 get_upgrade_path(PathFile, TargetVsn) ->
@@ -160,13 +162,13 @@ concat_relup(#{target_version := A, from_version := B},
              #{target_version := C, from_version := D}) ->
     throw({cannot_concat_relup, #{relup1 => {A, B}, relup2 => {C, D}}}).
 
-make_relup_tarball(TargetVsn, State) ->
+make_relup_tarball(TarFile, State) ->
     RelDir = get_rel_dir(State),
     Files = lists:map(fun(Dir) ->
         FullPathDir = filename:join([RelDir, Dir]),
         {Dir, FullPathDir}
     end, ?INCLUDE_DIRS),
-    ok = r3_hex_erl_tar:create(?TAR_FILE(TargetVsn), Files, [compressed]).
+    ok = r3_hex_erl_tar:create(TarFile, Files, [compressed]).
 
 %-------------------------------------------------------------------------------
 get_rel_dir(State) ->
