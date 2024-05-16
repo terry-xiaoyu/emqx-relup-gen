@@ -50,7 +50,9 @@ do(State) ->
 safe_do(State) ->
     {RawArgs, _} = rebar_state:command_parsed_args(State),
     RelupDir = getopt_relup_dir(RawArgs),
-    TargetVsn = get_current_rel_vsn(State),
+    TargetVsn = get_release_vsn(State),
+    ErtsVsn = get_erts_vsn(),
+    OtpVsn = get_otp_vsn(),
     TarFile = ?TAR_FILE(TargetVsn),
     PathFile = getopt_upgrade_path_file(RelupDir, RawArgs),
     rebar_log:log(info, "generating relup tarball for: ~p", [TargetVsn]),
@@ -61,7 +63,7 @@ safe_do(State) ->
     Relups = load_partial_relup_files(RelupDir),
     CompleteRelup = gen_compelte_relup(Relups, TargetVsn, UpgradePath),
     ok = save_relup_file(CompleteRelup, TargetVsn, State),
-    ok = make_relup_tarball(TarFile, State),
+    ok = make_relup_tarball(TarFile, ErtsVsn, OtpVsn, State),
     rebar_log:log(info, "relup tarball generated: ~p", [TarFile]),
     {ok, State}.
 
@@ -162,19 +164,32 @@ concat_relup(#{target_version := A, from_version := B},
              #{target_version := C, from_version := D}) ->
     throw({cannot_concat_relup, #{relup1 => {A, B}, relup2 => {C, D}}}).
 
-make_relup_tarball(TarFile, State) ->
+make_relup_tarball(TarFile, ErtsVsn, _OtpVsn, State) ->
     RelDir = get_rel_dir(State),
     Files = lists:map(fun(Dir) ->
         FullPathDir = filename:join([RelDir, Dir]),
         {Dir, FullPathDir}
-    end, ?INCLUDE_DIRS),
+    end, [lists:concat(["erts-", ErtsVsn]) | ?INCLUDE_DIRS]),
     ok = r3_hex_erl_tar:create(TarFile, Files, [compressed]).
 
 %-------------------------------------------------------------------------------
 get_rel_dir(State) ->
     filename:join([rebar_dir:base_dir(State), "rel", "emqx"]).
 
-get_current_rel_vsn(State) ->
+get_otp_vsn() ->
+    VsnFile = filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"]),
+    {ok, Version} = file:read_file(VsnFile),
+    binary_to_list(Version).
+
+get_erts_vsn() ->
+    VsnFile = filename:join([code:root_dir(), "releases", "start_erl.data"]),
+    {ok, Content} = file:read_file(VsnFile),
+    case string:split(Content, " ") of
+        [ErtsVsn, _OtpVsn] -> binary_to_list(string:trim(ErtsVsn));
+        _ -> throw({parse_start_erl_data_failed, VsnFile})
+    end.
+
+get_release_vsn(State) ->
     RelxOpts = rebar_state:get(State, relx, []),
     case lists:keyfind(release, 1, rebar_state:get(State, relx, [])) of
         false ->
